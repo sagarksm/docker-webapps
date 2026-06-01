@@ -1,0 +1,82 @@
+pipeline {
+    agent any
+
+    environment {
+        REMOTE_HOST = "192.168.1.30"
+        REMOTE_USER = "devops"
+        APP_DIR = "/tmp/docker-webapps"
+        APP_SUBDIR = "app-01-nginx"
+        IMAGE_NAME = "docker-webapp"
+        CONTAINER_NAME = "docker-webapp"
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'develop',
+                    url: 'https://github.com/sagarksm/docker-webapps.git'
+            }
+        }
+
+        stage('Debug Workspace') {
+            steps {
+                sh '''
+                pwd
+                ls -la
+                find . -type f
+                '''
+            }
+        }
+
+        stage('Copy Files To Docker Host') {
+            steps {
+                sh """
+                ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} 'rm -rf ${APP_DIR}; mkdir -p ${APP_DIR}'
+                scp -o StrictHostKeyChecking=no -r ./* ${REMOTE_USER}@${REMOTE_HOST}:${APP_DIR}/
+                """
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh """
+                ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
+                    cd ${APP_DIR}/${APP_SUBDIR}
+                    docker build -t ${IMAGE_NAME}:latest .
+                '
+                """
+            }
+        }
+
+        stage('Deploy Container') {
+            steps {
+                sh """
+                ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
+                    docker rm -f ${CONTAINER_NAME} || true
+                    docker run -d --name ${CONTAINER_NAME} -p 8080:80 ${IMAGE_NAME}:latest
+                '
+                """
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                sh """
+                ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
+                    docker ps
+                '
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Deployment completed successfully'
+        }
+        failure {
+            echo 'Pipeline failed'
+        }
+    }
+}
